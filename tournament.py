@@ -1,0 +1,228 @@
+#!/usr/bin/env python
+#
+# tournament.py -- implementation of a Swiss-system tournament
+#
+
+import psycopg2
+
+
+def connect():
+    """Connect to the PostgreSQL database.  Returns a database connection."""
+    return psycopg2.connect("dbname=tournament")
+
+
+def deleteMatches(tournament_id = 1):
+    """Remove all the match records from the database."""
+    conn = connect()
+    point = conn.cursor()
+
+    qry = '''
+        DELETE FROM Match
+        WHERE tournament_id = %s
+    '''
+    point.execute(qry, str(tournament_id))
+    conn.commit()
+    point.close()
+    conn.close()
+
+
+def deletePlayers(tournament_id = 1):
+    """Remove all the player records from the database."""
+    conn = connect()
+    point = conn.cursor()
+
+    qry = '''
+        DELETE FROM Register
+        WHERE tournament_id = %s;
+    '''
+    point.execute(qry, str(tournament_id))
+    conn.commit()
+    point.close()
+    conn.close()
+
+
+def countPlayers(tournament_id = 1):
+    """Returns the number of players currently registered."""
+    conn = connect()
+    point = conn.cursor()
+
+    qry = '''
+        SELECT COUNT(*) FROM Register
+        WHERE tournament_id = %s;
+    '''
+    point.execute(qry, str(tournament_id))
+    res = point.fetchone()[0]
+    point.close()
+    conn.close()
+
+    return res
+
+
+def registerPlayer(name, tournament_id = 1):
+    """Adds a player to the tournament database.
+
+    The database assigns a unique serial id number for the player.  (This
+    should be handled by your SQL database schema, not in your Python code.)
+
+    Args:
+      name: the player's full name (need not be unique).
+    """
+    conn = connect()
+    point = conn.cursor()
+
+    # Adds the player
+    qry1 = '''
+        INSERT INTO Player VALUES (DEFAULT, %s, DEFAULT);
+    '''
+    point.execute(qry1, (name,))
+    conn.commit()
+
+    # Includes the newly added player to the register
+    # Gets the player id first
+    qry2 = '''
+        SELECT id FROM Player
+        ORDER BY created DESC
+        LIMIT 1;
+    '''
+    point.execute(qry2)
+    res = point.fetchone()[0]
+
+    # Adds the player id to the register
+    qry3 = '''
+        INSERT INTO Register(tournament_id, player_id)
+        VALUES (%s, %s);
+    '''
+    point.execute(qry3, (str(tournament_id), str(res)))
+    conn.commit()
+
+    point.close()
+    conn.close()
+
+
+def playerStandings(tournament_id = 1):
+    """Returns a list of the players and their win records, sorted by wins.
+
+    The first entry in the list should be the player in first place, or a player
+    tied for first place if there is currently a tie.
+
+    Returns:
+      A list of tuples, each of which contains (id, name, wins, matches):
+        id: the player's unique id (assigned by the database)
+        name: the player's full name (as registered)
+        wins: the number of matches the player has won
+        matches: the number of matches the player has played
+    """
+    conn = connect()
+    point = conn.cursor()
+
+    # Gets the win record of players
+    qry = '''
+        SELECT tmp.*,
+            (CASE WHEN rnd.round IS NULL THEN 0 ELSE rnd.round END) FROM
+                (SELECT regplayer.player_id, regplayer.name,
+                    (CASE WHEN subq.win IS NULL THEN 0 ELSE subq.win END)
+                    FROM
+                        (SELECT Register.player_id, Player.name FROM Register
+                            INNER JOIN Player
+                            ON Register.player_id = Player.id
+                            ) as regplayer
+                LEFT JOIN
+                    (SELECT winner_id, count(winner_id) as win FROM Match
+                        WHERE tournament_id = %s
+                        GROUP BY winner_id) as subq
+                ON regplayer.player_id = subq.winner_id
+                ORDER BY subq.win DESC) as tmp
+        INNER JOIN
+            (SELECT Register.player_id, Match.round FROM Register
+                LEFT JOIN Match
+                ON Register.player_id = Match.winner_id
+                OR Register.player_id = Match.loser_id
+                WHERE Register.tournament_id = %s) as rnd
+        ON tmp.player_id = rnd.player_id
+        ORDER BY tmp.win DESC;
+    '''
+
+    point.execute(qry, (str(tournament_id), str(tournament_id)))
+    res = point.fetchall()
+
+    point.close()
+    conn.close()
+
+    return res
+
+
+def reportMatch(winner, loser, tournament_id = 1):
+    """Records the outcome of a single match between two players.
+
+    Args:
+      winner:  the id number of the player who won
+      loser:  the id number of the player who lost
+    """
+    conn = connect()
+    point = conn.cursor()
+
+    # Gets the maximum number of matches in a round
+    qry1 = '''
+        SELECT COUNT(*) FROM Register
+        WHERE tournament_id = %s;
+    '''
+    point.execute(qry1, str(tournament_id))
+    total_match = int(point.fetchone()[0])/2
+
+    # Checks the number of matches that have been completed in the round
+    qry2 = '''
+        SELECT (CASE WHEN round IS NULL THEN 1 END),
+            (CASE WHEN count(round) IS NULL THEN 0 END) FROM Match
+        WHERE tournament_id = %s
+        GROUP BY round
+        ORDER BY round DESC;
+    '''
+    point.execute(qry2, str(tournament_id))
+    try:
+        count_match = point.fetchone()[1]
+        curr_round = point.fetchone()[0]
+    except:
+        count_match = 0
+        curr_round = 1
+    print '%s, %s' % (count_match, total_match)
+    curr_match = curr_round if count_match < total_match else curr_round + 1
+
+    # Adds the match record
+    qry3 = '''
+        INSERT INTO Match(round, tournament_id, winner_id, loser_id)
+        VALUES (%s, %s, %s, %s);
+    '''
+    point.execute(
+        qry3, (curr_match, str(tournament_id), str(winner), str(loser)))
+    conn.commit()
+
+    point.close()
+    conn.close()
+
+
+def swissPairings(standings):
+    """Returns a list of pairs of players for the next round of a match.
+
+    Assuming that there are an even number of players registered, each player
+    appears exactly once in the pairings.  Each player is paired with another
+    player with an equal or nearly-equal win record, that is, a player adjacent
+    to him or her in the standings.
+
+    Returns:
+      A list of tuples, each of which contains (id1, name1, id2, name2)
+        id1: the first player's unique id
+        name1: the first player's name
+        id2: the second player's unique id
+        name2: the second player's name
+    """
+    lst = []
+
+    for i in range(len(standings))[::2]:
+        lst.append((
+            standings[i][0],
+            standings[i][1],
+            standings[i+1][0],
+            standings[i+1][1]))
+
+    return lst
+
