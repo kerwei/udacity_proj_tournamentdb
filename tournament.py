@@ -37,6 +37,13 @@ def deletePlayers(tournament_id = 1):
     '''
     point.execute(qry, str(tournament_id))
     conn.commit()
+
+    qry1 = '''
+        DELETE FROM Player;
+    '''
+    point.execute(qry1)
+    conn.commit()
+
     point.close()
     conn.close()
 
@@ -184,7 +191,7 @@ def reportMatch(winner, loser, tournament_id = 1):
     except:
         count_match = 0
         curr_round = 1
-    print '%s, %s' % (count_match, total_match)
+    print('%s, %s' % (count_match, total_match))
     curr_match = curr_round if count_match < total_match else curr_round + 1
 
     # Adds the match record
