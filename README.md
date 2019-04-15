@@ -12,9 +12,9 @@ The game tournament will use the Swiss system for pairing up players in each rou
 2. Check that the setup is complete and ready by running the packaged unittest
   - > python -m unittest tests/tournament_test.py
 3. If everything is set up properly, you should see the following:
-  > Ran 8 tests in 0.593s
-  >
-  > OK
-3. To use the module for your own Swiss system tournament, place tournament.py in the root
+    > Ran 8 tests in 0.593s
+    >
+    > OK
+4. To use the module for your own Swiss system tournament, place tournament.py in the root
 directory or the imports directory of your project. For further information on the methods provided by the module, please refer to the tournament.py file.
 
