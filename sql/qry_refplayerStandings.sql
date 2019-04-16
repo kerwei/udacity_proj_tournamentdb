@@ -1,23 +1,21 @@
-DO $$
-DECLARE
-    @tour_id INTEGER := 1;
-
-BEGIN
 /*  
     Returns a list of the players and their win records, sorted by wins.
     The first entry in the list should be the player in first place, or a player
     tied for first place if there is currently a tie.
 
+    Args:
+        1. tour_id
+
     | Begin Python parsing |
 */
-    ;WITH WinCount AS
+    WITH WinCount AS
     (
         SELECT
             winner_id, 
             count(winner_id) AS win 
         FROM 
             Match
-        WHERE tournament_id = @tour_id
+        WHERE tournament_id = tour_id
         GROUP BY winner_id
     ),
     MatchCount AS
@@ -29,7 +27,7 @@ BEGIN
             Register AS regplyr
         LEFT JOIN Match mthwin ON regplyr.player_id = mthwin.winner_id
         LEFT JOIN Match mthlss ON regplyr.player_id = mthlss.loser_id
-        WHERE regplyr.tournament_id = @tour_id
+        WHERE regplyr.tournament_id = tour_id
         GROUP BY regplyr.player_id
     )
     SELECT 
@@ -44,4 +42,3 @@ BEGIN
     LEFT JOIN MatchCount AS rnd ON regplyr.player_id = rnd.player_id
     ORDER BY wc.win DESC;
 /* | End Python parsing | */
-END $$

@@ -54,7 +54,7 @@ def refplayerStandings(tournament_id=1, qname='playerStandings', **kwargs):
             wins: the number of matches the player has won
             matches: the number of matches the player has played
     """
-    kwargs['query'] = kwargs['query'].replace('@tour_id', r'%s')
+    kwargs['query'] = kwargs['query'].replace('tour_id', r'%s')
     with connect() as conn:
         with conn.cursor() as csor:
             csor.execute(
