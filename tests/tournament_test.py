@@ -65,6 +65,15 @@ class TestStandings(unittest.TestCase):
         self.assertTrue(all([matches1 == 0, matches2 == 0, wins1 == 0, wins2 == 0]))
         self.assertEqual(set([name1, name2]), set(["Melpomene Murray", "Randy Schwartz"]))
 
+    def test_refhasStanding(self):
+        """
+        5.1. (Refactored) Newly registered players appear in the standings with no matches
+        """
+        self.standings = tournament.refplayerStandings()
+        [(id1, name1, wins1, matches1), (id2, name2, wins2, matches2)] = self.standings
+        self.assertTrue(all([matches1 == 0, matches2 == 0, wins1 == 0, wins2 == 0]))
+        self.assertEqual(set([name1, name2]), set(["Melpomene Murray", "Randy Schwartz"]))
+
 
 class TestMatchUpdates(unittest.TestCase):
     standings = []
