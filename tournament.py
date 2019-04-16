@@ -2,13 +2,68 @@
 #
 # tournament.py -- implementation of a Swiss-system tournament
 #
-
+import os
 import psycopg2
+import string
 
+from functools import wraps
+
+BASEDIR = os.getcwd()
 
 def connect():
     """Connect to the PostgreSQL database.  Returns a database connection."""
     return psycopg2.connect("dbname=tournament")
+
+
+def injectQryString(f):
+    """
+    Fetch the SQL query, based on the given query name.
+    Returns the function called, with an additional query kwarg
+
+    Relies on fixed formatting applied to sql files.
+    Python script imports the section after the second pipe 
+    character. 
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        qname = f.__name__
+        qpath = ''.join(['qry_', qname, '.sql'])
+        with open(os.path.join(BASEDIR, 'sql', qpath)) as qfile:
+            qstring = qfile.read()
+            # Further split by forward slash to clear out comment chars at both ends
+            query = qstring.split('|')[2].split('/')[1]
+        kwargs['query'] = query
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+
+@injectQryString
+def refplayerStandings(tournament_id=1, qname='playerStandings', **kwargs):
+    """
+        Refactored function of playerStandings()
+        Returns a list of the players and their win records, sorted by wins.
+
+        The first entry in the list should be the player in first place, or a player
+        tied for first place if there is currently a tie.
+
+        Returns:
+            A list of tuples, each of which contains (id, name, wins, matches):
+            id: the player's unique id (assigned by the database)
+            name: the player's full name (as registered)
+            wins: the number of matches the player has won
+            matches: the number of matches the player has played
+    """
+    kwargs['query'] = kwargs['query'].replace('@tour_id', r'%s')
+    with connect() as conn:
+        with conn.cursor() as csor:
+            csor.execute(
+                kwargs['query'], 
+                (str(tournament_id), str(tournament_id)))
+            res = csor.fetchall()
+    
+    conn.close()
+    return res
 
 
 def deleteMatches(tournament_id = 1):
@@ -117,29 +172,39 @@ def playerStandings(tournament_id = 1):
 
     # Gets the win record of players
     qry = '''
-        SELECT tmp.*,
-            (CASE WHEN rnd.round IS NULL THEN 0 ELSE rnd.round END) FROM
-                (SELECT regplayer.player_id, regplayer.name,
-                    (CASE WHEN subq.win IS NULL THEN 0 ELSE subq.win END)
-                    FROM
-                        (SELECT Register.player_id, Player.name FROM Register
-                            INNER JOIN Player
-                            ON Register.player_id = Player.id
-                            ) as regplayer
-                LEFT JOIN
-                    (SELECT winner_id, count(winner_id) as win FROM Match
-                        WHERE tournament_id = %s
-                        GROUP BY winner_id) as subq
-                ON regplayer.player_id = subq.winner_id
-                ORDER BY subq.win DESC) as tmp
-        INNER JOIN
-            (SELECT Register.player_id, Match.round FROM Register
-                LEFT JOIN Match
-                ON Register.player_id = Match.winner_id
-                OR Register.player_id = Match.loser_id
-                WHERE Register.tournament_id = %s) as rnd
-        ON tmp.player_id = rnd.player_id
-        ORDER BY tmp.win DESC;
+        ;WITH WinCount AS
+        (
+            SELECT 
+                winner_id, 
+                count(winner_id) AS win 
+            FROM 
+                Match
+            WHERE tournament_id = %s
+            GROUP BY winner_id
+        ),
+        MatchCount AS
+        (
+            SELECT DISTINCT
+                regplyr.player_id,
+                COALESCE(MAX(mthwin.round), MAX(mthlss.round)) AS round
+            FROM 
+                Register AS regplyr
+            LEFT JOIN Match mthwin ON regplyr.player_id = mthwin.winner_id
+            LEFT JOIN Match mthlss ON regplyr.player_id = mthlss.loser_id
+            WHERE regplyr.tournament_id = %s
+            GROUP BY regplyr.player_id
+        )
+        SELECT 
+            regplyr.player_id,
+            plyr.name,
+            COALESCE(wc.win, 0) AS win,
+            COALESCE(rnd.round, 0) AS matches
+        FROM
+            Register AS regplyr
+        INNER JOIN Player AS plyr ON regplyr.player_id = plyr.id
+        LEFT JOIN WinCount AS wc ON regplyr.player_id = wc.winner_id
+        LEFT JOIN MatchCount AS rnd ON regplyr.player_id = rnd.player_id
+        ORDER BY wc.win DESC;
     '''
 
     point.execute(qry, (str(tournament_id), str(tournament_id)))
